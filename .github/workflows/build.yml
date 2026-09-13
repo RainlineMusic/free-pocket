@@ -15,6 +15,7 @@ env:
   PLUGIN_VERSION: "0.1.0"
   JUCE_VERSION: "8.0.4"
   PLUGINVAL_VERSION: "v1.0.4"
+  GH_HOST: "github.com"
 
 jobs:
   macos:
@@ -35,7 +36,7 @@ jobs:
         if: steps.juce-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          curl -fsSL -o juce.zip "https://github.com/juce-framework/JUCE/releases/download/${JUCE_VERSION}/juce-${JUCE_VERSION}-osx.zip"
+          curl -fsSL -o juce.zip "https://${GH_HOST}/juce-framework/JUCE/releases/download/${JUCE_VERSION}/juce-${JUCE_VERSION}-osx.zip"
           unzip -q juce.zip -d juce-download
           mv juce-download/JUCE JUCE
           rm -rf juce.zip juce-download
@@ -71,7 +72,7 @@ jobs:
       - name: Install pluginval
         run: |
           set -euo pipefail
-          curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/pluginval_macOS.zip"
+          curl -fsSL -o pluginval.zip "https://${GH_HOST}/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/pluginval_macOS.zip"
           unzip -q pluginval.zip
 
       - name: Validate the VST3
@@ -117,7 +118,7 @@ jobs:
         if: steps.juce-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/juce-framework/JUCE/archive/refs/tags/$env:JUCE_VERSION.zip" -OutFile juce.zip
+          Invoke-WebRequest -Uri "https://$env:GH_HOST/juce-framework/JUCE/archive/refs/tags/$env:JUCE_VERSION.zip" -OutFile juce.zip
           Expand-Archive -Path juce.zip -DestinationPath juce-download
           Move-Item -Path "juce-download/JUCE-$env:JUCE_VERSION" -Destination JUCE
           Remove-Item juce.zip -Force
@@ -154,7 +155,7 @@ jobs:
       - name: Install pluginval
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/Tracktion/pluginval/releases/download/$env:PLUGINVAL_VERSION/pluginval_Windows.zip" -OutFile pluginval.zip
+          Invoke-WebRequest -Uri "https://$env:GH_HOST/Tracktion/pluginval/releases/download/$env:PLUGINVAL_VERSION/pluginval_Windows.zip" -OutFile pluginval.zip
           Expand-Archive -Path pluginval.zip -DestinationPath pluginval
 
       - name: Validate the VST3
