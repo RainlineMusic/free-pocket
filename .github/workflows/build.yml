@@ -1,0 +1,188 @@
+name: Build Free Pocket
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feature/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: free-pocket-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLUGIN_VERSION: "0.1.0"
+  JUCE_VERSION: "8.0.4"
+  PLUGINVAL_VERSION: "v1.0.4"
+  SCHEME: "https"
+  GH_HOST: "github.com"
+
+jobs:
+  macos:
+    name: macOS (VST3 + AAX)
+    runs-on: macos-14
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Cache JUCE
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: JUCE
+          key: juce-${{ env.JUCE_VERSION }}-macos
+
+      - name: Download JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          JUCE_URL="${SCHEME}://${GH_HOST}/juce-framework/JUCE/releases/download/${JUCE_VERSION}/juce-${JUCE_VERSION}-osx.zip"
+          curl -fsSL -o juce.zip "$JUCE_URL"
+          unzip -q juce.zip -d juce-download
+          mv juce-download/JUCE JUCE
+          rm -rf juce.zip juce-download
+
+      - name: Verify the bundled AAX SDK
+        run: |
+          set -euo pipefail
+          if [ ! -d "JUCE/modules/juce_audio_plugin_client/AAX/SDK" ]; then
+            echo "::error::JUCE ${JUCE_VERSION} does not contain the bundled AAX SDK; the AAX target cannot be configured"
+            exit 1
+          fi
+
+      - name: Configure
+        run: |
+          cmake -B build -G Xcode \
+            -DJUCE_DIR="$PWD/JUCE" \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: DSP core tests
+        run: |
+          cmake --build build --config Release --target FreePocketTests
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Build VST3 and AAX (Release)
+        run: |
+          cmake --build build --config Release --target FreePocket_VST3
+          cmake --build build --config Release --target FreePocket_AAX
+
+      - name: Build AAX (Debug)
+        run: cmake --build build --config Debug --target FreePocket_AAX
+
+      - name: Install pluginval
+        run: |
+          set -euo pipefail
+          PV_URL="${SCHEME}://${GH_HOST}/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/pluginval_macOS.zip"
+          curl -fsSL -o pluginval.zip "$PV_URL"
+          unzip -q pluginval.zip
+
+      - name: Validate the VST3
+        run: |
+          set -euo pipefail
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate-in-process \
+            "build/FreePocket_artefacts/Release/VST3/Free Pocket.vst3"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/Release artifacts/Debug
+          cp -R "build/FreePocket_artefacts/Release/VST3/Free Pocket.vst3" artifacts/Release/
+          if [ -d "build/FreePocket_artefacts/Release/AAX/Free Pocket.aaxplugin" ]; then
+            cp -R "build/FreePocket_artefacts/Release/AAX/Free Pocket.aaxplugin" artifacts/Release/
+          fi
+          if [ -d "build/FreePocket_artefacts/Debug/AAX/Free Pocket.aaxplugin" ]; then
+            cp -R "build/FreePocket_artefacts/Debug/AAX/Free Pocket.aaxplugin" artifacts/Debug/
+          fi
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreePocket-${{ env.PLUGIN_VERSION }}-macOS
+          path: artifacts
+          if-no-files-found: error
+
+  windows:
+    name: Windows (VST3 + AAX)
+    runs-on: windows-2022
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Cache JUCE
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: JUCE
+          key: juce-${{ env.JUCE_VERSION }}-windows
+
+      - name: Download JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "$env:SCHEME`://$env:GH_HOST/juce-framework/JUCE/archive/refs/tags/$env:JUCE_VERSION.zip"
+          Invoke-WebRequest -Uri $url -OutFile juce.zip
+          Expand-Archive -Path juce.zip -DestinationPath juce-download
+          Move-Item -Path "juce-download/JUCE-$env:JUCE_VERSION" -Destination JUCE
+          Remove-Item juce.zip -Force
+          Remove-Item juce-download -Recurse -Force
+
+      - name: Verify the bundled AAX SDK
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "JUCE/modules/juce_audio_plugin_client/AAX/SDK")) {
+            Write-Error "JUCE $env:JUCE_VERSION does not contain the bundled AAX SDK; the AAX target cannot be configured"
+            exit 1
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -B build -A x64 -DJUCE_DIR="$PWD/JUCE"
+
+      - name: DSP core tests
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target FreePocketTests
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Build VST3 and AAX (Release)
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target FreePocket_VST3
+          cmake --build build --config Release --target FreePocket_AAX
+
+      - name: Build AAX (Debug)
+        shell: pwsh
+        run: cmake --build build --config Debug --target FreePocket_AAX
+
+      - name: Install pluginval
+        shell: pwsh
+        run: |
+          $url = "$env:SCHEME`://$env:GH_HOST/Tracktion/pluginval/releases/download/$env:PLUGINVAL_VERSION/pluginval_Windows.zip"
+          Invoke-WebRequest -Uri $url -OutFile pluginval.zip
+          Expand-Archive -Path pluginval.zip -DestinationPath pluginval
+
+      - name: Validate the VST3
+        shell: pwsh
+        run: |
+          ./pluginval/pluginval.exe --strictness-level 5 --validate-in-process "build/FreePocket_artefacts/Release/VST3/Free Pocket.vst3"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/Release, artifacts/Debug | Out-Null
+          Copy-Item -Recurse "build/FreePocket_artefacts/Release/VST3/Free Pocket.vst3" artifacts/Release/
+          if (Test-Path "build/FreePocket_artefacts/Release/AAX/Free Pocket.aaxplugin") {
+            Copy-Item -Recurse "build/FreePocket_artefacts/Release/AAX/Free Pocket.aaxplugin" artifacts/Release/
+          }
+          if (Test-Path "build/FreePocket_artefacts/Debug/AAX/Free Pocket.aaxplugin") {
+            Copy-Item -Recurse "build/FreePocket_artefacts/Debug/AAX/Free Pocket.aaxplugin" artifacts/Debug/
+          }
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreePocket-${{ env.PLUGIN_VERSION }}-Windows
+          path: artifacts
+          if-no-files-found: error
